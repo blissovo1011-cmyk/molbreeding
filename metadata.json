@@ -1,0 +1,5 @@
+{
+  "name": "MolBreeding 试剂产品中心",
+  "description": "全局主数据管理 MVP，包含产品试剂中心、大陆 MIMS 和海外 MIMS 模拟系统。",
+  "requestFramePermissions": []
+}
