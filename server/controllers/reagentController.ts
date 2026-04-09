@@ -73,10 +73,3 @@ export async function remove(req: Request, res: Response, next: NextFunction) {
     res.json({ success: true, data: null });
   } catch (err) { next(err); }
 }
-
-export async function remove(req: Request, res: Response, next: NextFunction) {
-  try {
-    await reagentService.deleteReagent(req.params.id);
-    res.json({ success: true, data: null });
-  } catch (err) { next(err); }
-}
