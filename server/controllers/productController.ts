@@ -67,3 +67,17 @@ export async function subOffline(req: Request, res: Response, next: NextFunction
     res.json({ success: true, data: product });
   } catch (err) { next(err); }
 }
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await productService.deleteProduct(req.params.id);
+    res.json({ success: true, data: null });
+  } catch (err) { next(err); }
+}
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await productService.deleteProduct(req.params.id);
+    res.json({ success: true, data: null });
+  } catch (err) { next(err); }
+}

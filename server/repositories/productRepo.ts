@@ -166,3 +166,24 @@ export async function updateSyncFields(id: string, fields: {
   await execute(`UPDATE products SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
   return findById(id);
 }
+
+export async function remove(id: string): Promise<boolean> {
+  // Delete associated reagents first (and their warehouses/sync configs cascade)
+  await execute(`DELETE FROM reagent_sync_configs WHERE "reagentId" IN (SELECT id FROM reagents WHERE "productId" = $1)`, [id]);
+  await execute(`DELETE FROM reagent_warehouses WHERE "reagentId" IN (SELECT id FROM reagents WHERE "productId" = $1)`, [id]);
+  await execute(`DELETE FROM reagents WHERE "productId" = $1`, [id]);
+  const count = await execute(`DELETE FROM products WHERE id = $1`, [id]);
+  return count > 0;
+}
+
+export async function remove(id: string): Promise<boolean> {
+  // Delete associated reagents first (and their warehouses/sync configs cascade)
+  const reagentIds = await query('SELECT id FROM reagents WHERE "productId" = $1', [id]);
+  for (const r of reagentIds) {
+    await execute('DELETE FROM reagent_sync_configs WHERE "reagentId" = $1', [r.id]);
+    await execute('DELETE FROM reagent_warehouses WHERE "reagentId" = $1', [r.id]);
+  }
+  await execute('DELETE FROM reagents WHERE "productId" = $1', [id]);
+  const count = await execute('DELETE FROM products WHERE id = $1', [id]);
+  return count > 0;
+}

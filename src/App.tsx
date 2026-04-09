@@ -549,6 +549,24 @@ const ProductManagement: React.FC<{
             items.push({ key: '2', label: '申请下架', onClick: () => handleStatusChange(record, 'Obsolete') });
             items.push({ key: '3', label: '同步产品', onClick: () => handleSync(record) });
           }
+          items.push({ key: '4', label: '删除', danger: true, onClick: () => {
+            Modal.confirm({
+              title: '确认删除',
+              content: '删除后产品及其关联的试剂、在售区域数据将一并删除，不可恢复。',
+              okText: '删除',
+              okType: 'danger',
+              cancelText: '取消',
+              onOk: async () => {
+                try {
+                  await api.deleteProduct(record.id);
+                  message.success('产品已删除');
+                  await onRefresh();
+                } catch (err: any) {
+                  message.error(err.message || '删除失败');
+                }
+              },
+            });
+          }});
 
           return (
             <Space>
@@ -1183,6 +1201,29 @@ const ReagentManagement: React.FC<{
               key: '2',
               label: '同步试剂',
               onClick: () => handleSync(record)
+            });
+            items.push({
+              key: '3',
+              label: '删除',
+              danger: true,
+              onClick: () => {
+                Modal.confirm({
+                  title: '确认删除',
+                  content: '删除后试剂及其在售区域数据将一并删除，不可恢复。',
+                  okText: '删除',
+                  okType: 'danger',
+                  cancelText: '取消',
+                  onOk: async () => {
+                    try {
+                      await api.deleteReagent(record.id);
+                      message.success('试剂已删除');
+                      await onRefresh();
+                    } catch (err: any) {
+                      message.error(err.message || '删除失败');
+                    }
+                  },
+                });
+              }
             });
           }
 

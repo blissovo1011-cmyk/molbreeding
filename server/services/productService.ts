@@ -76,3 +76,15 @@ export async function offlineProduct(id: string, data: OfflineDTO): Promise<Prod
 
   return (await productRepo.findById(id))!;
 }
+
+export async function deleteProduct(id: string): Promise<void> {
+  const product = await productRepo.findById(id);
+  if (!product) throw new NotFoundError('Product');
+  await productRepo.remove(id);
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  const product = await productRepo.findById(id);
+  if (!product) throw new NotFoundError('Product');
+  await productRepo.remove(id);
+}

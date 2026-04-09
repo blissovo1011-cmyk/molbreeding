@@ -65,6 +65,10 @@ export async function updateProduct(id: string, data: any): Promise<any> {
   });
 }
 
+export async function deleteProduct(id: string): Promise<void> {
+  return request<void>(`/api/products/${id}`, { method: 'DELETE' });
+}
+
 export async function publishProduct(id: string, data: any): Promise<any> {
   return request<any>(`/api/products/${id}/publish`, {
     method: 'POST',
@@ -129,6 +133,10 @@ export async function updateReagent(id: string, data: any): Promise<any> {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+export async function deleteReagent(id: string): Promise<void> {
+  return request<void>(`/api/reagents/${id}`, { method: 'DELETE' });
 }
 
 export async function publishReagent(id: string): Promise<any> {

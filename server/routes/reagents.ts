@@ -8,6 +8,7 @@ router.get('/', reagentController.list);
 router.get('/:id', reagentController.getById);
 router.post('/', reagentController.create);
 router.put('/:id', reagentController.update);
+router.delete('/:id', reagentController.remove);
 
 router.post('/:id/publish', reagentController.publish);
 router.post('/:id/offline', reagentController.offline);
