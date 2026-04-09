@@ -71,6 +71,10 @@ export async function create(data: ProductCreateDTO): Promise<Product> {
   const values: any[] = fields.map(f => {
     if (f === 'id') return id;
     if (f === 'status') return 'Pending';
+    // Boolean fields default to false
+    if (f === 'finalReport' || f === 'isLocusSecret' || f === 'canUpgradeToNewVersion') {
+      return (data as any)[f] ?? false;
+    }
     const val = (data as any)[f];
     return val ?? null;
   });
