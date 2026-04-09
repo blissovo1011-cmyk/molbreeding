@@ -56,6 +56,7 @@ export function findAll(options?: { system?: SubSystem }): Reagent[] {
   if (conditions.length > 0) {
     sql += ' WHERE ' + conditions.join(' AND ');
   }
+  sql += ' ORDER BY createdAt DESC';
 
   const rows = db.prepare(sql).all(...params) as any[];
 
