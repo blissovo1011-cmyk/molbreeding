@@ -106,6 +106,7 @@ export function updateReagentSync(id: string, data: ReagentSyncDTO): Reagent {
       alertValue: data.mainlandConfig.alertValue,
       warehouse: data.mainlandConfig.warehouse,
       kingdeeCode: data.mainlandConfig.kingdeeCode,
+      status: reagent.status,
     });
   }
 
@@ -116,6 +117,7 @@ export function updateReagentSync(id: string, data: ReagentSyncDTO): Reagent {
       warehouse: data.overseasConfig.warehouse,
       kingdeeCode: data.overseasConfig.kingdeeCode,
       localName: data.overseasConfig.localName,
+      status: reagent.status,
     });
   }
 
