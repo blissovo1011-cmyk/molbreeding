@@ -114,12 +114,6 @@ export async function updateSyncFields(id: string, fields: { syncMainland?: bool
 }
 
 export async function remove(id: string): Promise<boolean> {
-  // Warehouses and sync configs cascade via ON DELETE CASCADE
-  const count = await execute(`DELETE FROM reagents WHERE id = $1`, [id]);
-  return count > 0;
-}
-
-export async function remove(id: string): Promise<boolean> {
   await execute('DELETE FROM reagent_sync_configs WHERE "reagentId" = $1', [id]);
   await execute('DELETE FROM reagent_warehouses WHERE "reagentId" = $1', [id]);
   const count = await execute('DELETE FROM reagents WHERE id = $1', [id]);

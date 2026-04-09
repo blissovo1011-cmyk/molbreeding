@@ -82,9 +82,3 @@ export async function deleteProduct(id: string): Promise<void> {
   if (!product) throw new NotFoundError('Product');
   await productRepo.remove(id);
 }
-
-export async function deleteProduct(id: string): Promise<void> {
-  const product = await productRepo.findById(id);
-  if (!product) throw new NotFoundError('Product');
-  await productRepo.remove(id);
-}

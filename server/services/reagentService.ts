@@ -52,9 +52,3 @@ export async function deleteReagent(id: string): Promise<void> {
   if (!reagent) throw new NotFoundError('Reagent');
   await reagentRepo.remove(id);
 }
-
-export async function deleteReagent(id: string): Promise<void> {
-  const reagent = await reagentRepo.findById(id);
-  if (!reagent) throw new NotFoundError('Reagent');
-  await reagentRepo.remove(id);
-}
