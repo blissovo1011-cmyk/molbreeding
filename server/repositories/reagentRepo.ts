@@ -1,24 +1,12 @@
-import { getDb } from '../db';
+import { query, queryOne, execute, getPool } from '../db.js';
 import { v4 as uuid } from 'uuid';
-import type { Reagent, ReagentCreateDTO, ReagentUpdateDTO, ReagentWarehouse, ReagentSyncConfig, ProductStatus, SubSystem } from '../types';
+import type { Reagent, ReagentCreateDTO, ReagentUpdateDTO, ReagentWarehouse, ReagentSyncConfig, ProductStatus, SubSystem } from '../types.js';
 
-/** Convert SQLite 0/1 to boolean for sync fields */
 function rowToReagent(row: any, warehouses: ReagentWarehouse[], syncConfigs: ReagentSyncConfig[]): Reagent {
   const mainlandCfg = syncConfigs.find(c => c.system === 'mainland');
   const overseasCfg = syncConfigs.find(c => c.system === 'overseas');
-
   return {
-    id: row.id,
-    category: row.category,
-    name: row.name,
-    productId: row.productId,
-    spec: row.spec,
-    batchNo: row.batchNo ?? undefined,
-    stock: row.stock ?? undefined,
-    expiryDate: row.expiryDate ?? undefined,
-    status: row.status,
-    syncMainland: !!row.syncMainland,
-    syncOverseas: !!row.syncOverseas,
+    ...row,
     warehouses,
     mainlandConfig: mainlandCfg
       ? { alertValue: mainlandCfg.alertValue!, warehouse: mainlandCfg.warehouse!, kingdeeCode: mainlandCfg.kingdeeCode!, status: mainlandCfg.status }
@@ -26,158 +14,101 @@ function rowToReagent(row: any, warehouses: ReagentWarehouse[], syncConfigs: Rea
     overseasConfig: overseasCfg
       ? { alertValue: overseasCfg.alertValue!, warehouse: overseasCfg.warehouse!, kingdeeCode: overseasCfg.kingdeeCode!, localName: overseasCfg.localName!, status: overseasCfg.status }
       : undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
   };
 }
 
-function getWarehouses(reagentId: string): ReagentWarehouse[] {
-  const db = getDb();
-  return db.prepare('SELECT * FROM reagent_warehouses WHERE reagentId = ?').all(reagentId) as ReagentWarehouse[];
+async function getWarehouses(reagentId: string): Promise<ReagentWarehouse[]> {
+  return query('SELECT * FROM reagent_warehouses WHERE "reagentId" = $1', [reagentId]);
 }
 
-function getSyncConfigs(reagentId: string): ReagentSyncConfig[] {
-  const db = getDb();
-  return db.prepare('SELECT * FROM reagent_sync_configs WHERE reagentId = ?').all(reagentId) as ReagentSyncConfig[];
+async function getSyncConfigs(reagentId: string): Promise<ReagentSyncConfig[]> {
+  return query('SELECT * FROM reagent_sync_configs WHERE "reagentId" = $1', [reagentId]);
 }
 
-export function findAll(options?: { system?: SubSystem }): Reagent[] {
-  const db = getDb();
+export async function findAll(options?: { system?: SubSystem }): Promise<Reagent[]> {
   const conditions: string[] = [];
-  const params: any[] = [];
-
-  if (options?.system === 'mainland') {
-    conditions.push('syncMainland = 1');
-  } else if (options?.system === 'overseas') {
-    conditions.push('syncOverseas = 1');
-  }
+  if (options?.system === 'mainland') conditions.push(`"syncMainland" = true`);
+  else if (options?.system === 'overseas') conditions.push(`"syncOverseas" = true`);
 
   let sql = 'SELECT * FROM reagents';
-  if (conditions.length > 0) {
-    sql += ' WHERE ' + conditions.join(' AND ');
-  }
-  sql += ' ORDER BY createdAt DESC';
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
+  sql += ' ORDER BY "createdAt" DESC';
 
-  const rows = db.prepare(sql).all(...params) as any[];
-
-  return rows.map(row => {
-    const warehouses = getWarehouses(row.id);
-    const syncConfigs = getSyncConfigs(row.id);
+  const rows = await query(sql);
+  return Promise.all(rows.map(async (row) => {
+    const warehouses = await getWarehouses(row.id);
+    const syncConfigs = await getSyncConfigs(row.id);
     return rowToReagent(row, warehouses, syncConfigs);
-  });
+  }));
 }
 
-export function findById(id: string): Reagent | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM reagents WHERE id = ?').get(id) as any;
+export async function findById(id: string): Promise<Reagent | null> {
+  const row = await queryOne('SELECT * FROM reagents WHERE id = $1', [id]);
   if (!row) return null;
-
-  const warehouses = getWarehouses(row.id);
-  const syncConfigs = getSyncConfigs(row.id);
+  const warehouses = await getWarehouses(id);
+  const syncConfigs = await getSyncConfigs(id);
   return rowToReagent(row, warehouses, syncConfigs);
 }
 
-export function create(data: ReagentCreateDTO): Reagent {
-  const db = getDb();
+export async function create(data: ReagentCreateDTO): Promise<Reagent> {
   const id = uuid();
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-  const insertReagent = db.prepare(`
-    INSERT INTO reagents (id, category, name, productId, spec, status, syncMainland, syncOverseas, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, 'Pending', 0, 0, ?, ?)
-  `);
-
-  const insertWarehouse = db.prepare(`
-    INSERT INTO reagent_warehouses (id, reagentId, warehouse, itemNo, kingdeeCode)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  const txn = db.transaction(() => {
-    insertReagent.run(id, data.category, data.name, data.productId, data.spec, now, now);
-
-    for (const wh of data.warehouses) {
-      insertWarehouse.run(uuid(), id, wh.warehouse, wh.itemNo, wh.kingdeeCode);
-    }
-  });
-
-  txn();
-
-  return findById(id)!;
+  await execute(
+    `INSERT INTO reagents (id, category, name, "productId", spec, status, "syncMainland", "syncOverseas") VALUES ($1,$2,$3,$4,$5,'Pending',false,false)`,
+    [id, data.category, data.name, data.productId, data.spec]
+  );
+  for (const wh of data.warehouses) {
+    await execute(
+      `INSERT INTO reagent_warehouses (id, "reagentId", warehouse, "itemNo", "kingdeeCode") VALUES ($1,$2,$3,$4,$5)`,
+      [uuid(), id, wh.warehouse, wh.itemNo, wh.kingdeeCode]
+    );
+  }
+  return (await findById(id))!;
 }
 
-export function update(id: string, data: ReagentUpdateDTO): Reagent | null {
-  const db = getDb();
-
-  const existing = db.prepare('SELECT id FROM reagents WHERE id = ?').get(id);
+export async function update(id: string, data: ReagentUpdateDTO): Promise<Reagent | null> {
+  const existing = await queryOne('SELECT id FROM reagents WHERE id = $1', [id]);
   if (!existing) return null;
 
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-  // Build SET clauses for reagent fields (excluding warehouses)
   const { warehouses, ...fields } = data;
   const entries = Object.entries(fields).filter(([_, v]) => v !== undefined);
 
-  const txn = db.transaction(() => {
-    if (entries.length > 0) {
-      const setClauses: string[] = [];
-      const params: any[] = [];
-
-      for (const [key, value] of entries) {
-        setClauses.push(`${key} = ?`);
-        params.push(value);
-      }
-
-      setClauses.push('updatedAt = ?');
-      params.push(now);
-      params.push(id);
-
-      db.prepare(`UPDATE reagents SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
-    } else {
-      // Still update updatedAt
-      db.prepare('UPDATE reagents SET updatedAt = ? WHERE id = ?').run(now, id);
+  if (entries.length > 0) {
+    const setClauses: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+    for (const [key, value] of entries) {
+      setClauses.push(`"${key}" = $${idx++}`);
+      params.push(value);
     }
-
-    // If warehouses provided, delete-then-insert
-    if (warehouses) {
-      db.prepare('DELETE FROM reagent_warehouses WHERE reagentId = ?').run(id);
-
-      const insertWarehouse = db.prepare(`
-        INSERT INTO reagent_warehouses (id, reagentId, warehouse, itemNo, kingdeeCode)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-
-      for (const wh of warehouses) {
-        insertWarehouse.run(uuid(), id, wh.warehouse, wh.itemNo, wh.kingdeeCode);
-      }
-    }
-  });
-
-  txn();
-
-  return findById(id)!;
-}
-
-export function updateStatus(id: string, status: ProductStatus): void {
-  const db = getDb();
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  db.prepare('UPDATE reagents SET status = ?, updatedAt = ? WHERE id = ?').run(status, now, id);
-}
-
-export function updateSyncFields(id: string, fields: { syncMainland?: boolean; syncOverseas?: boolean }): void {
-  const db = getDb();
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const setClauses: string[] = ['updatedAt = ?'];
-  const params: any[] = [now];
-
-  if (fields.syncMainland !== undefined) {
-    setClauses.push('syncMainland = ?');
-    params.push(fields.syncMainland ? 1 : 0);
-  }
-  if (fields.syncOverseas !== undefined) {
-    setClauses.push('syncOverseas = ?');
-    params.push(fields.syncOverseas ? 1 : 0);
+    setClauses.push(`"updatedAt" = NOW()`);
+    params.push(id);
+    await execute(`UPDATE reagents SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
+  } else {
+    await execute(`UPDATE reagents SET "updatedAt" = NOW() WHERE id = $1`, [id]);
   }
 
+  if (warehouses) {
+    await execute(`DELETE FROM reagent_warehouses WHERE "reagentId" = $1`, [id]);
+    for (const wh of warehouses) {
+      await execute(
+        `INSERT INTO reagent_warehouses (id, "reagentId", warehouse, "itemNo", "kingdeeCode") VALUES ($1,$2,$3,$4,$5)`,
+        [uuid(), id, wh.warehouse, wh.itemNo, wh.kingdeeCode]
+      );
+    }
+  }
+  return (await findById(id))!;
+}
+
+export async function updateStatus(id: string, status: ProductStatus): Promise<void> {
+  await execute(`UPDATE reagents SET status = $1, "updatedAt" = NOW() WHERE id = $2`, [status, id]);
+}
+
+export async function updateSyncFields(id: string, fields: { syncMainland?: boolean; syncOverseas?: boolean }): Promise<void> {
+  const setClauses: string[] = [`"updatedAt" = NOW()`];
+  const params: any[] = [];
+  let idx = 1;
+  if (fields.syncMainland !== undefined) { setClauses.push(`"syncMainland" = $${idx++}`); params.push(fields.syncMainland); }
+  if (fields.syncOverseas !== undefined) { setClauses.push(`"syncOverseas" = $${idx++}`); params.push(fields.syncOverseas); }
   params.push(id);
-  db.prepare(`UPDATE reagents SET ${setClauses.join(', ')} WHERE id = ?`).run(...params);
+  await execute(`UPDATE reagents SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
 }

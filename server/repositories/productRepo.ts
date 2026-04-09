@@ -1,58 +1,41 @@
-import { getDb } from '../db';
+import { query, queryOne, execute } from '../db.js';
 import { v4 as uuid } from 'uuid';
-import type { Product, ProductCreateDTO, ProductUpdateDTO, ProductStatus, SubSystem } from '../types';
+import type { Product, ProductCreateDTO, ProductUpdateDTO, ProductStatus, SubSystem } from '../types.js';
 
-// Boolean fields stored as INTEGER 0/1 in SQLite
-const BOOLEAN_FIELDS = ['finalReport', 'isLocusSecret', 'canUpgradeToNewVersion', 'syncMainland', 'syncOverseas'] as const;
-
-/** Convert a raw SQLite row to a Product entity with proper JS booleans */
 function rowToProduct(row: any): Product {
-  const product = { ...row };
-  for (const field of BOOLEAN_FIELDS) {
-    if (field in product) {
-      product[field] = !!product[field];
-    }
-  }
-  return product as Product;
+  const p = { ...row };
+  // Build mainlandConfig and overseasConfig
+  p.mainlandConfig = p.syncMainland
+    ? { alertValue: p.mainlandAlertValue, status: p.mainlandStatus }
+    : undefined;
+  p.overseasConfig = p.syncOverseas
+    ? { alertValue: p.overseasAlertValue, status: p.overseasStatus }
+    : undefined;
+  return p as Product;
 }
 
-export function findAll(options?: { category?: string; system?: SubSystem }): Product[] {
-  const db = getDb();
+export async function findAll(options?: { category?: string; system?: SubSystem }): Promise<Product[]> {
   const conditions: string[] = [];
   const params: any[] = [];
+  let idx = 1;
 
   if (options?.category) {
-    conditions.push('category = ?');
+    conditions.push(`category = $${idx++}`);
     params.push(options.category);
   }
-
   if (options?.system === 'mainland') {
-    conditions.push('syncMainland = 1');
+    conditions.push(`"syncMainland" = true`);
   } else if (options?.system === 'overseas') {
-    conditions.push('syncOverseas = 1');
+    conditions.push(`"syncOverseas" = true`);
   }
 
   let sql = 'SELECT * FROM products';
-  if (conditions.length > 0) {
-    sql += ' WHERE ' + conditions.join(' AND ');
-  }
-  sql += ' ORDER BY createdAt DESC';
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
+  sql += ' ORDER BY "createdAt" DESC';
 
-  const rows = db.prepare(sql).all(...params) as any[];
-
+  const rows = await query(sql, params);
   return rows.map((row) => {
     const product = rowToProduct(row);
-
-    // Build mainlandConfig and overseasConfig objects (same as findById)
-    (product as any).mainlandConfig = product.syncMainland
-      ? { alertValue: product.mainlandAlertValue, status: product.mainlandStatus }
-      : undefined;
-
-    (product as any).overseasConfig = product.syncOverseas
-      ? { alertValue: product.overseasAlertValue, status: product.overseasStatus }
-      : undefined;
-
-    // When system is specified, map the subsystem alertValue/status onto the response
     if (options?.system === 'mainland') {
       product.alertValue = product.mainlandAlertValue ?? product.alertValue;
       product.status = product.mainlandStatus ?? product.status;
@@ -60,35 +43,18 @@ export function findAll(options?: { category?: string; system?: SubSystem }): Pr
       product.alertValue = product.overseasAlertValue ?? product.alertValue;
       product.status = product.overseasStatus ?? product.status;
     }
-
     return product;
   });
 }
 
-export function findById(id: string): Product | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(id) as any;
+export async function findById(id: string): Promise<Product | null> {
+  const row = await queryOne('SELECT * FROM products WHERE id = $1', [id]);
   if (!row) return null;
-
-  const product = rowToProduct(row);
-
-  // Include mainlandConfig and overseasConfig objects for detail view
-  (product as any).mainlandConfig = product.syncMainland
-    ? { alertValue: product.mainlandAlertValue, status: product.mainlandStatus }
-    : undefined;
-
-  (product as any).overseasConfig = product.syncOverseas
-    ? { alertValue: product.overseasAlertValue, status: product.overseasStatus }
-    : undefined;
-
-  return product;
+  return rowToProduct(row);
 }
 
-export function create(data: ProductCreateDTO): Product {
-  const db = getDb();
+export async function create(data: ProductCreateDTO): Promise<Product> {
   const id = uuid();
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
   const fields = [
     'id', 'code', 'category', 'status', 'productType', 'productTech', 'species', 'alertValue',
     'version', 'nameEn', 'nameCn', 'projectCode', 'clientUnit', 'clientName',
@@ -99,151 +65,100 @@ export function create(data: ProductCreateDTO): Product {
     'applicationDirection', 'catalog', 'configDir', 'isLocusSecret', 'reagentQc',
     'transferDate', 'usage', 'recommendCrossCycle', 'traitName',
     'canUpgradeToNewVersion', 'minEffectiveDepth', 'transgenicEvent',
-    'transferInfo', 'remark', 'syncMainland', 'syncOverseas', 'createdAt', 'updatedAt',
+    'transferInfo', 'remark',
   ];
 
-  const values: any[] = [];
-  for (const field of fields) {
-    if (field === 'id') { values.push(id); continue; }
-    if (field === 'status') { values.push('Pending'); continue; }
-    if (field === 'syncMainland') { values.push(0); continue; }
-    if (field === 'syncOverseas') { values.push(0); continue; }
-    if (field === 'createdAt' || field === 'updatedAt') { values.push(now); continue; }
+  const values: any[] = fields.map(f => {
+    if (f === 'id') return id;
+    if (f === 'status') return 'Pending';
+    const val = (data as any)[f];
+    return val ?? null;
+  });
 
-    const val = (data as any)[field];
-    // Convert boolean fields to 0/1 for SQLite
-    if (field === 'finalReport' || field === 'isLocusSecret' || field === 'canUpgradeToNewVersion') {
-      values.push(val ? 1 : 0);
-    } else {
-      values.push(val ?? null);
-    }
-  }
-
-  const placeholders = fields.map(() => '?').join(', ');
-  const sql = `INSERT INTO products (${fields.join(', ')}) VALUES (${placeholders})`;
-  db.prepare(sql).run(...values);
-
-  return findById(id)!;
+  const cols = fields.map(f => `"${f}"`).join(', ');
+  const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
+  await execute(`INSERT INTO products (${cols}) VALUES (${placeholders})`, values);
+  return (await findById(id))!;
 }
 
-export function update(id: string, data: ProductUpdateDTO): Product | null {
-  const db = getDb();
-
-  // Check existence first
-  const existing = db.prepare('SELECT id FROM products WHERE id = ?').get(id);
+export async function update(id: string, data: ProductUpdateDTO): Promise<Product | null> {
+  const existing = await queryOne('SELECT id FROM products WHERE id = $1', [id]);
   if (!existing) return null;
 
   const entries = Object.entries(data).filter(([_, v]) => v !== undefined);
-  if (entries.length === 0) {
-    return findById(id);
-  }
+  if (entries.length === 0) return findById(id);
 
   const setClauses: string[] = [];
   const params: any[] = [];
+  let idx = 1;
 
   for (const [key, value] of entries) {
-    setClauses.push(`${key} = ?`);
-    // Convert boolean fields to 0/1
-    if (key === 'finalReport' || key === 'isLocusSecret' || key === 'canUpgradeToNewVersion') {
-      params.push(value ? 1 : 0);
-    } else {
-      params.push(value);
-    }
+    setClauses.push(`"${key}" = $${idx++}`);
+    params.push(value);
   }
-
-  // Always update updatedAt
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  setClauses.push('updatedAt = ?');
-  params.push(now);
-
+  setClauses.push(`"updatedAt" = NOW()`);
   params.push(id);
-  const sql = `UPDATE products SET ${setClauses.join(', ')} WHERE id = ?`;
-  db.prepare(sql).run(...params);
 
+  await execute(`UPDATE products SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
   return findById(id);
 }
 
-export function updateStatus(id: string, status: ProductStatus, extraFields?: Record<string, any>): Product | null {
-  const db = getDb();
-
-  const existing = db.prepare('SELECT id FROM products WHERE id = ?').get(id);
+export async function updateStatus(id: string, status: ProductStatus, extraFields?: Record<string, any>): Promise<Product | null> {
+  const existing = await queryOne('SELECT id FROM products WHERE id = $1', [id]);
   if (!existing) return null;
 
-  const setClauses: string[] = ['status = ?'];
+  const setClauses: string[] = [`status = $1`];
   const params: any[] = [status];
+  let idx = 2;
 
   if (extraFields) {
     for (const [key, value] of Object.entries(extraFields)) {
       if (value !== undefined) {
-        setClauses.push(`${key} = ?`);
+        setClauses.push(`"${key}" = $${idx++}`);
         params.push(value);
       }
     }
   }
-
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  setClauses.push('updatedAt = ?');
-  params.push(now);
-
+  setClauses.push(`"updatedAt" = NOW()`);
   params.push(id);
-  const sql = `UPDATE products SET ${setClauses.join(', ')} WHERE id = ?`;
-  db.prepare(sql).run(...params);
 
+  await execute(`UPDATE products SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
   return findById(id);
 }
 
-export function updateSyncFields(id: string, fields: {
-  syncMainland?: boolean;
-  syncOverseas?: boolean;
-  mainlandAlertValue?: number;
-  overseasAlertValue?: number;
-  mainlandStatus?: string;
-  overseasStatus?: string;
-}): Product | null {
-  const db = getDb();
-
-  const existing = db.prepare('SELECT id FROM products WHERE id = ?').get(id);
+export async function updateSyncFields(id: string, fields: {
+  syncMainland?: boolean; syncOverseas?: boolean;
+  mainlandAlertValue?: number; overseasAlertValue?: number;
+  mainlandStatus?: string; overseasStatus?: string;
+}): Promise<Product | null> {
+  const existing = await queryOne('SELECT id FROM products WHERE id = $1', [id]);
   if (!existing) return null;
 
   const setClauses: string[] = [];
   const params: any[] = [];
+  let idx = 1;
 
-  if (fields.syncMainland !== undefined) {
-    setClauses.push('syncMainland = ?');
-    params.push(fields.syncMainland ? 1 : 0);
-  }
-  if (fields.syncOverseas !== undefined) {
-    setClauses.push('syncOverseas = ?');
-    params.push(fields.syncOverseas ? 1 : 0);
-  }
-  if (fields.mainlandAlertValue !== undefined) {
-    setClauses.push('mainlandAlertValue = ?');
-    params.push(fields.mainlandAlertValue);
-  }
-  if (fields.overseasAlertValue !== undefined) {
-    setClauses.push('overseasAlertValue = ?');
-    params.push(fields.overseasAlertValue);
-  }
-  if (fields.mainlandStatus !== undefined) {
-    setClauses.push('mainlandStatus = ?');
-    params.push(fields.mainlandStatus);
-  }
-  if (fields.overseasStatus !== undefined) {
-    setClauses.push('overseasStatus = ?');
-    params.push(fields.overseasStatus);
+  const fieldMap: Record<string, any> = {
+    syncMainland: fields.syncMainland,
+    syncOverseas: fields.syncOverseas,
+    mainlandAlertValue: fields.mainlandAlertValue,
+    overseasAlertValue: fields.overseasAlertValue,
+    mainlandStatus: fields.mainlandStatus,
+    overseasStatus: fields.overseasStatus,
+  };
+
+  for (const [key, value] of Object.entries(fieldMap)) {
+    if (value !== undefined) {
+      setClauses.push(`"${key}" = $${idx++}`);
+      params.push(value);
+    }
   }
 
-  if (setClauses.length === 0) {
-    return findById(id);
-  }
+  if (setClauses.length === 0) return findById(id);
 
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  setClauses.push('updatedAt = ?');
-  params.push(now);
-
+  setClauses.push(`"updatedAt" = NOW()`);
   params.push(id);
-  const sql = `UPDATE products SET ${setClauses.join(', ')} WHERE id = ?`;
-  db.prepare(sql).run(...params);
 
+  await execute(`UPDATE products SET ${setClauses.join(', ')} WHERE id = $${idx}`, params);
   return findById(id);
 }
