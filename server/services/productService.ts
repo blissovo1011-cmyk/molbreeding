@@ -18,6 +18,9 @@ export async function getProduct(id: string): Promise<Product> {
 }
 
 export async function createProduct(data: ProductCreateDTO): Promise<Product> {
+  // Coerce alertValue to number
+  if (data.alertValue !== undefined) data.alertValue = Number(data.alertValue);
+  
   for (const field of REQUIRED_FIELDS) {
     if (data[field] === undefined || data[field] === null || data[field] === '') {
       throw new ValidationError(`Missing required field: ${field}`);
