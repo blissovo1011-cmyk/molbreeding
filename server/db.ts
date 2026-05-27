@@ -7,7 +7,11 @@ let db: Database.Database | null = null;
 export function getDb(): Database.Database {
   if (db) return db;
 
-  const dataDir = path.resolve('data');
+  // Vercel Serverless: use /tmp for writable storage
+  // Local dev: use ./data directory
+  const isVercel = !!process.env.VERCEL;
+  const dataDir = isVercel ? '/tmp' : path.resolve('data');
+
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
