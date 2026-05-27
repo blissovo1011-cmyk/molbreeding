@@ -139,6 +139,7 @@ export interface Product {
   category: string;
   status: ProductStatus;
   version: string;
+  parentId?: string;
   nameEn: string;
   nameCn: string;
   projectCode?: string;

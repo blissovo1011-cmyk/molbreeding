@@ -12,6 +12,8 @@ router.delete('/:id', productController.remove);
 
 router.post('/:id/publish', productController.publish);
 router.post('/:id/offline', productController.offline);
+router.post('/:id/upgrade', productController.upgrade);
+router.get('/:id/versions', productController.versionHistory);
 router.put('/:id/sync', productController.syncConfig);
 router.post('/:id/sub-publish', productController.subPublish);
 router.post('/:id/sub-offline', productController.subOffline);

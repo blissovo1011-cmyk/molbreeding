@@ -1,32 +1,21 @@
-import pg from 'pg';
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
 
-const { Pool } = pg;
+let db: Database.Database | null = null;
 
-let pool: pg.Pool | null = null;
+export function getDb(): Database.Database {
+  if (db) return db;
 
-export function getPool(): pg.Pool {
-  if (pool) return pool;
+  const dataDir = path.resolve('data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
 
-  const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/molbreeding';
+  const dbPath = path.join(dataDir, 'molbreeding.db');
+  db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
-  pool = new Pool({ connectionString });
-  return pool;
-}
-
-// Helper: run a query and return rows
-export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const result = await getPool().query(sql, params);
-  return result.rows as T[];
-}
-
-// Helper: run a query and return first row or null
-export async function queryOne<T = any>(sql: string, params: any[] = []): Promise<T | null> {
-  const rows = await query<T>(sql, params);
-  return rows[0] ?? null;
-}
-
-// Helper: run a query (INSERT/UPDATE/DELETE) and return row count
-export async function execute(sql: string, params: any[] = []): Promise<number> {
-  const result = await getPool().query(sql, params);
-  return result.rowCount ?? 0;
+  return db;
 }

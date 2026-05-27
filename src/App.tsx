@@ -243,17 +243,65 @@ const ProductManagement: React.FC<{
   const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
   const [isSubPublishModalOpen, setIsSubPublishModalOpen] = useState(false);
   const [isSubOfflineModalOpen, setIsSubOfflineModalOpen] = useState(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [subActionTarget, setSubActionTarget] = useState<{ product: Product, system: 'mainland' | 'overseas' } | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [upgradingProduct, setUpgradingProduct] = useState<Product | null>(null);
+  const [versionHistories, setVersionHistories] = useState<Record<string, Product[]>>({});
   const [columnConfigs, setColumnConfigs] = useState<ColumnConfig[]>(DEFAULT_COLUMNS_CONFIG);
   const [activeTab, setActiveTab] = useState('全部');
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
+  const [upgradeForm] = Form.useForm();
   const [syncForm] = Form.useForm();
   const [publishForm] = Form.useForm();
   const [offlineForm] = Form.useForm();
   const [subPublishForm] = Form.useForm();
   const [subOfflineForm] = Form.useForm();
+
+  const handleUpgrade = (record: Product) => {
+    setUpgradingProduct(record);
+    upgradeForm.resetFields();
+    // Pre-fill with current product data, increment version
+    const currentVersion = record.version || 'V1.0';
+    const versionNum = parseFloat(currentVersion.replace(/[^0-9.]/g, '')) || 1.0;
+    const newVersion = `V${(versionNum + 1.0).toFixed(1)}`;
+    upgradeForm.setFieldsValue({
+      ...record,
+      version: newVersion,
+      id: undefined,
+      status: undefined,
+      parentId: undefined,
+    });
+    setIsUpgradeModalOpen(true);
+  };
+
+  const onUpgradeSubmit = async () => {
+    try {
+      const values = await upgradeForm.validateFields();
+      setSubmitting(true);
+      if (upgradingProduct) {
+        await api.upgradeProduct(upgradingProduct.id, values);
+        message.success('产品升级成功，旧版本已自动下架');
+        setIsUpgradeModalOpen(false);
+        await onRefresh();
+      }
+    } catch (err: any) {
+      if (err.errorFields) return;
+      message.error(err.message || '操作失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const loadVersionHistory = async (productId: string) => {
+    try {
+      const history = await api.getProductVersions(productId);
+      setVersionHistories(prev => ({ ...prev, [productId]: history }));
+    } catch (err) {
+      // silently fail
+    }
+  };
 
   const handleStatusChange = (record: Product, newStatus: ProductStatus) => {
     if (newStatus === 'Effective') {
@@ -465,9 +513,9 @@ const ProductManagement: React.FC<{
       code: { title: '产品编号', dataIndex: 'code', key: 'code', width: 150, render: (text: string) => <Text strong>{text}</Text> },
       category: { title: '产品类别', dataIndex: 'category', key: 'category', width: 120 },
       version: { title: '产品版本', dataIndex: 'version', key: 'version', width: 100 },
-      nameCn: { title: '产品名称(中)', dataIndex: 'nameCn', key: 'nameCn', width: 150 },
-      nameEn: { title: '产品名称(英)', dataIndex: 'nameEn', key: 'nameEn', width: 150 },
-      projectCode: { title: '项目编号', dataIndex: 'projectCode', key: 'projectCode', width: 120 },
+      nameCn: { title: '产品名称(中)', dataIndex: 'nameCn', key: 'nameCn', width: 150, ellipsis: { showTitle: true } },
+      nameEn: { title: '产品名称(英)', dataIndex: 'nameEn', key: 'nameEn', width: 180, ellipsis: { showTitle: true } },
+      projectCode: { title: '项目编号', dataIndex: 'projectCode', key: 'projectCode', width: 120, ellipsis: { showTitle: true } },
       productType: { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 120 },
       productTech: { title: '产品技术', dataIndex: 'productTech', key: 'productTech', width: 120 },
       species: { title: '物种', dataIndex: 'species', key: 'species', width: 120 },
@@ -520,9 +568,15 @@ const ProductManagement: React.FC<{
         dataIndex: 'status',
         key: 'status',
         width: 100,
-        render: (status: ProductStatus) => {
+        render: (_status: ProductStatus, record: Product) => {
+          let displayStatus = _status;
+          if (filterSystem === 'Mainland' && record.mainlandConfig?.status) {
+            displayStatus = record.mainlandConfig.status;
+          } else if (filterSystem === 'Overseas' && record.overseasConfig?.status) {
+            displayStatus = record.overseasConfig.status;
+          }
           const colors = { Effective: 'success', Pending: 'warning', Obsolete: 'error' };
-          return <Tag color={colors[status]}>{status === 'Effective' ? '在售' : status === 'Pending' ? '待定' : '下架'}</Tag>;
+          return <Tag color={colors[displayStatus]}>{displayStatus === 'Effective' ? '在售' : displayStatus === 'Pending' ? '待定' : '下架'}</Tag>;
         }
       },
       sync: {
@@ -548,6 +602,7 @@ const ProductManagement: React.FC<{
           } else {
             items.push({ key: '2', label: '申请下架', onClick: () => handleStatusChange(record, 'Obsolete') });
             items.push({ key: '3', label: '同步产品', onClick: () => handleSync(record) });
+            items.push({ key: '5', label: '产品升级', onClick: () => handleUpgrade(record) });
           }
           items.push({ key: '4', label: '删除', danger: true, onClick: () => {
             Modal.confirm({
@@ -704,6 +759,35 @@ const ProductManagement: React.FC<{
                   />
                 ) : (
                   <div className="text-center py-8 text-gray-400">该产品尚未同步至任何业务系统</div>
+                )}
+
+                <div className="flex justify-between items-center mb-4 mt-6">
+                  <div className="text-base text-gray-800">历史版本</div>
+                  <Button type="link" size="small" onClick={() => loadVersionHistory(record.id)}>
+                    <RefreshCw size={14} />
+                  </Button>
+                </div>
+                {versionHistories[record.id] && versionHistories[record.id].length > 0 ? (
+                  <Table
+                    dataSource={versionHistories[record.id]}
+                    columns={[
+                      { title: '产品编号', dataIndex: 'code', key: 'code' },
+                      { title: '产品版本', dataIndex: 'version', key: 'version', render: (v: string) => <Tag>{v}</Tag> },
+                      { title: '产品名称(中)', dataIndex: 'nameCn', key: 'nameCn', ellipsis: true },
+                      { title: '产品名称(英)', dataIndex: 'nameEn', key: 'nameEn', ellipsis: true },
+                      { title: '产品状态', dataIndex: 'status', key: 'status', render: (status: ProductStatus) => {
+                        const colors = { Effective: 'success', Pending: 'warning', Obsolete: 'error' };
+                        return <Tag color={colors[status]}>{status === 'Effective' ? '在售' : status === 'Pending' ? '待定' : '下架'}</Tag>;
+                      }},
+                    ]}
+                    pagination={false}
+                    size="small"
+                    rowKey="id"
+                  />
+                ) : (
+                  <div className="text-center py-4 text-gray-400">
+                    {versionHistories[record.id] ? '暂无历史版本' : <Button type="link" onClick={() => loadVersionHistory(record.id)}>加载历史版本</Button>}
+                  </div>
                 )}
               </div>
             );
@@ -942,6 +1026,36 @@ const ProductManagement: React.FC<{
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="产品升级"
+        open={isUpgradeModalOpen}
+        onOk={onUpgradeSubmit}
+        onCancel={() => setIsUpgradeModalOpen(false)}
+        width={1000}
+        okText="确认升级"
+        cancelText="取消"
+        confirmLoading={submitting}
+        centered styles={{ body: MODAL_BODY_STYLE }}
+      >
+        <div className="mb-4 p-3 bg-blue-50 rounded text-sm text-blue-700">
+          升级将基于当前产品创建新版本，旧版本将自动下架。请修改需要更新的字段。
+        </div>
+        <Form form={upgradeForm} layout="vertical" className="grid grid-cols-4 gap-x-4">
+          <Form.Item name="category" label="产品类别" rules={[{ required: true }]}><Select placeholder="请选择产品类别" options={[{ value: '自主研发', label: '自主研发' }, { value: '定制开发', label: '定制开发' }]} /></Form.Item>
+          <Form.Item name="code" label="产品编号" rules={[{ required: true }]}><Input placeholder="请输入产品编号" /></Form.Item>
+          <Form.Item name="version" label="产品版本" rules={[{ required: true }]}><Input placeholder="请输入版本号" /></Form.Item>
+          <Form.Item name="alertValue" label="试剂预警值(次)" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: '100%' }} /></Form.Item>
+
+          <Form.Item name="nameEn" label="产品名称（英）" className="col-span-2"><Input placeholder="请输入产品名称（英）" /></Form.Item>
+          <Form.Item name="nameCn" label="产品名称（中）" className="col-span-2"><Input placeholder="请输入产品名称（中）" /></Form.Item>
+
+          <Form.Item name="projectCode" label="项目编号"><Input /></Form.Item>
+          <Form.Item name="productType" label="产品类型" rules={[{ required: true }]}><Select options={[{ value: '对外产品', label: '对外产品' }, { value: '对内产品', label: '对内产品' }, { value: '定制产品', label: '定制产品' }]} /></Form.Item>
+          <Form.Item name="productTech" label="产品技术" rules={[{ required: true }]}><Select options={[{ value: 'GenoBaits®', label: 'GenoBaits®' }, { value: 'GenoPlexs®', label: 'GenoPlexs®' }]} /></Form.Item>
+          <Form.Item name="species" label="物种" rules={[{ required: true }]}><Select options={[{ value: '玉米', label: '玉米' }, { value: '山羊', label: '山羊' }]} /></Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
@@ -980,11 +1094,17 @@ const ReagentManagement: React.FC<{
 }> = ({ reagents, onRefresh, products, readOnly = false, filterSystem }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
   const [editingReagent, setEditingReagent] = useState<Reagent | null>(null);
+  const [publishingReagent, setPublishingReagent] = useState<Reagent | null>(null);
+  const [offlineReagent, setOfflineReagent] = useState<Reagent | null>(null);
   const [columnConfigs, setColumnConfigs] = useState<ColumnConfig[]>(() => getInitialReagentConfigs(filterSystem));
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [syncForm] = Form.useForm();
+  const [publishForm] = Form.useForm();
+  const [offlineForm] = Form.useForm();
 
   useEffect(() => {
     setColumnConfigs(getInitialReagentConfigs(filterSystem));
@@ -1110,7 +1230,10 @@ const ReagentManagement: React.FC<{
         title: '关联检测产品', 
         dataIndex: 'productId', 
         key: 'productId',
-        render: (pid: string) => products.find(p => p.id === pid)?.nameCn || '未知产品'
+        render: (pid: string) => {
+          const p = products.find(p => p.id === pid);
+          return p ? (p.nameCn || p.nameEn || p.code) : '未知产品';
+        }
       },
       spec: { title: '规格', dataIndex: 'spec', key: 'spec' },
       warehouseInfo: { 
@@ -1183,17 +1306,14 @@ const ReagentManagement: React.FC<{
               label: isEffective ? '下架' : '上架',
               danger: isEffective,
               onClick: async () => {
-                try {
-                  if (isEffective) {
-                    await api.offlineReagent(record.id);
-                    message.success('已下架');
-                  } else {
-                    await api.publishReagent(record.id);
-                    message.success('已上架');
-                  }
-                  await onRefresh();
-                } catch (err: any) {
-                  message.error(err.message || '操作失败');
+                if (isEffective) {
+                  setOfflineReagent(record);
+                  offlineForm.resetFields();
+                  setIsOfflineModalOpen(true);
+                } else {
+                  setPublishingReagent(record);
+                  publishForm.resetFields();
+                  setIsPublishModalOpen(true);
                 }
               }
             });
@@ -1402,7 +1522,7 @@ const ReagentManagement: React.FC<{
               placeholder="请选择已生效的产品"
               options={effectiveProducts.map(p => ({
                 value: p.id,
-                label: `${p.nameCn} (${p.code})`
+                label: `${p.nameCn || p.nameEn || p.code} (${p.code})`
               }))}
             />
           </Form.Item>
@@ -1515,6 +1635,121 @@ const ReagentManagement: React.FC<{
           </div>
         </Form>
       </Modal>
+
+      <Modal
+        title="申请上架审批"
+        open={isPublishModalOpen}
+        onOk={async () => {
+          try {
+            const values = await publishForm.validateFields();
+            setSubmitting(true);
+            if (publishingReagent) {
+              await api.publishReagent(publishingReagent.id, {
+                syncMainland: values.syncMainland,
+                syncOverseas: values.syncOverseas,
+                mainlandConfig: values.syncMainland ? { alertValue: values.mainlandAlert } : undefined,
+                overseasConfig: values.syncOverseas ? { alertValue: values.overseasAlert, localName: values.overseasLocalName } : undefined,
+              });
+              message.success('已发起上架审批');
+              setIsPublishModalOpen(false);
+              await onRefresh();
+            }
+          } catch (err: any) {
+            if (err.errorFields) return;
+            message.error(err.message || '操作失败');
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+        onCancel={() => setIsPublishModalOpen(false)}
+        confirmLoading={submitting}
+        centered
+        styles={{ body: MODAL_BODY_STYLE }}
+      >
+        <Form form={publishForm} layout="vertical" className="mt-4">
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea rows={3} placeholder="请输入备注信息" maxLength={500} showCount />
+          </Form.Item>
+
+          <div className="border rounded-lg p-4 mb-4 bg-white shadow-sm">
+            <div className="flex justify-between items-center mb-2">
+              <Text strong>同步到大陆MIMS：</Text>
+              <Form.Item name="syncMainland" valuePropName="checked" noStyle><Switch /></Form.Item>
+            </div>
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.syncMainland !== curr.syncMainland}>
+              {({ getFieldValue }) => getFieldValue('syncMainland') && (
+                <div className="mt-2">
+                  <Form.Item name="mainlandAlert" label="试剂预警值（次）" rules={[{ required: true, message: '请输入预警值' }]}>
+                    <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="请输入预警值" />
+                  </Form.Item>
+                </div>
+              )}
+            </Form.Item>
+          </div>
+
+          <div className="border rounded-lg p-4 bg-white shadow-sm">
+            <div className="flex justify-between items-center mb-2">
+              <Text strong>同步到海外MIMS：</Text>
+              <Form.Item name="syncOverseas" valuePropName="checked" noStyle><Switch /></Form.Item>
+            </div>
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.syncOverseas !== curr.syncOverseas}>
+              {({ getFieldValue }) => getFieldValue('syncOverseas') && (
+                <div className="mt-2">
+                  <Form.Item name="overseasAlert" label="试剂预警值（次）" rules={[{ required: true, message: '请输入预警值' }]}>
+                    <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="请输入预警值" />
+                  </Form.Item>
+                  <Form.Item name="overseasLocalName" label="英文名称" rules={[{ required: true, message: '请输入英文名称' }]}>
+                    <Input placeholder="请输入英文名称" />
+                  </Form.Item>
+                </div>
+              )}
+            </Form.Item>
+          </div>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="申请下架审批"
+        open={isOfflineModalOpen}
+        onOk={async () => {
+          try {
+            const values = await offlineForm.validateFields();
+            setSubmitting(true);
+            if (offlineReagent) {
+              await api.offlineReagent(offlineReagent.id, {
+                offlineReason: values.offlineReason,
+              });
+              message.success('已发起下架审批');
+              setIsOfflineModalOpen(false);
+              await onRefresh();
+            }
+          } catch (err: any) {
+            if (err.errorFields) return;
+            message.error(err.message || '操作失败');
+          } finally {
+            setSubmitting(false);
+          }
+        }}
+        onCancel={() => setIsOfflineModalOpen(false)}
+        confirmLoading={submitting}
+        okText="确定"
+        cancelText="取消"
+        centered
+        styles={{ body: MODAL_BODY_STYLE }}
+      >
+        <Form form={offlineForm} layout="vertical" className="mt-4">
+          <Form.Item name="offlineReason" label="下架原因" rules={[{ required: true, message: '请输入下架原因' }]}>
+            <Input.TextArea rows={4} placeholder="请输入下架原因" maxLength={500} showCount />
+          </Form.Item>
+          <div className="flex items-center gap-2 mb-4">
+            <Text>同步下架大陆/海外MIMS</Text>
+            <Switch checked disabled />
+          </div>
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea rows={3} maxLength={500} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };
@@ -1530,7 +1765,7 @@ export default function App() {
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const data = await api.getProducts();
+      const data = await api.getProducts({ all: 'true' });
       setProducts(data);
     } catch (err: any) {
       message.error(err.message || '获取产品列表失败');

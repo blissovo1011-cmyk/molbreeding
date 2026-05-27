@@ -1,5 +1,7 @@
 // API 服务层 — 使用原生 fetch，匹配 Express 后端
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+
 // 统一响应类型（与后端 server/types.ts 中 ApiResponse 一致）
 interface ApiResponse<T = any> {
   success: boolean;
@@ -11,7 +13,7 @@ interface ApiResponse<T = any> {
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(`${API_BASE}${url}`, {
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
@@ -35,12 +37,13 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 // --------------- 产品 API 方法（9 个） ---------------
 
-export async function getProducts(params?: { category?: string; system?: string }): Promise<any[]> {
+export async function getProducts(params?: { category?: string; system?: string; all?: string }): Promise<any[]> {
   let url = '/api/products';
   if (params) {
     const qs = new URLSearchParams();
     if (params.category) qs.set('category', params.category);
     if (params.system) qs.set('system', params.system);
+    if (params.all) qs.set('all', params.all);
     const str = qs.toString();
     if (str) url += `?${str}`;
   }
@@ -104,6 +107,17 @@ export async function subOfflineProduct(id: string, system: string): Promise<any
   });
 }
 
+export async function upgradeProduct(id: string, data: any): Promise<any> {
+  return request<any>(`/api/products/${id}/upgrade`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getProductVersions(id: string): Promise<any[]> {
+  return request<any[]>(`/api/products/${id}/versions`);
+}
+
 // --------------- 试剂 API 方法（9 个） ---------------
 
 export async function getReagents(params?: { system?: string }): Promise<any[]> {
@@ -139,15 +153,17 @@ export async function deleteReagent(id: string): Promise<void> {
   return request<void>(`/api/reagents/${id}`, { method: 'DELETE' });
 }
 
-export async function publishReagent(id: string): Promise<any> {
+export async function publishReagent(id: string, data?: any): Promise<any> {
   return request<any>(`/api/reagents/${id}/publish`, {
     method: 'POST',
+    body: data ? JSON.stringify(data) : undefined,
   });
 }
 
-export async function offlineReagent(id: string): Promise<any> {
+export async function offlineReagent(id: string, data?: any): Promise<any> {
   return request<any>(`/api/reagents/${id}/offline`, {
     method: 'POST',
+    body: data ? JSON.stringify(data) : undefined,
   });
 }
 
